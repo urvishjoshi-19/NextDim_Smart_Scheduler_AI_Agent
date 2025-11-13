@@ -34,6 +34,7 @@ service-account-key.json
 credentials.json
 token.json
 tokens/
+CREDENTIALS.txt
 
 # IDE
 .vscode/
@@ -53,4 +54,7 @@ coverage/
 # Deployment
 .vercel
 .gcloud/
+
+# Google Cloud SDK (contains test keys)
+exec -l/
 

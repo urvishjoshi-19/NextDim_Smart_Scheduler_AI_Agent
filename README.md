@@ -779,16 +779,14 @@ nano .env  # or use any text editor
 **Paste this content:**
 
 ```bash
-# API Keys (Already Provided - Ready to Use)
-DEEPGRAM_API_KEY=15f17a5d84cb7514f748f4b55417a9dbcc3ef385
-GEMINI_API_KEY=AIzaSyAIql_bxafjZzapYoYcSN0tt6Zz2O-4z4M
+# === API KEYS (GET FROM CREDENTIALS.txt) ===
+DEEPGRAM_API_KEY=<FROM_CREDENTIALS_TXT>
+GEMINI_API_KEY=<FROM_CREDENTIALS_TXT>
 
-# Google Cloud Configuration
+# === GOOGLE CLOUD (GET FROM CREDENTIALS.txt) ===
 GOOGLE_CLOUD_PROJECT=smart-scheduler-ai
-
-# OAuth 2.0 Credentials (See CREDENTIALS.txt for values)
-GOOGLE_CLIENT_ID=YOUR_CLIENT_ID_HERE
-GOOGLE_CLIENT_SECRET=YOUR_CLIENT_SECRET_HERE
+GOOGLE_CLIENT_ID=<FROM_CREDENTIALS_TXT>
+GOOGLE_CLIENT_SECRET=<FROM_CREDENTIALS_TXT>
 GOOGLE_APPLICATION_CREDENTIALS=./client_secret.json
 
 # Server Configuration
@@ -1216,7 +1214,7 @@ pip install -r requirements.txt
 ```bash
 # Solution: Check .env file exists and has correct format
 cat .env | grep DEEPGRAM_API_KEY
-# Should show: DEEPGRAM_API_KEY=15f17a5d84cb7514f748f4b55417a9dbcc3ef385
+# Should show: DEEPGRAM_API_KEY=your_key_here
 ```
 
 ### OAuth Issues
@@ -1663,11 +1661,11 @@ except Exception as e:
 ### Backend `.env` File
 
 ```bash
-# === API KEYS (PROVIDED) ===
-DEEPGRAM_API_KEY=15f17a5d84cb7514f748f4b55417a9dbcc3ef385
-GEMINI_API_KEY=AIzaSyAIql_bxafjZzapYoYcSN0tt6Zz2O-4z4M
+# === API KEYS (GET FROM CREDENTIALS.txt) ===
+DEEPGRAM_API_KEY=<FROM_CREDENTIALS_TXT>
+GEMINI_API_KEY=<FROM_CREDENTIALS_TXT>
 
-# === GOOGLE CLOUD (FROM CREDENTIALS.txt) ===
+# === GOOGLE CLOUD (GET FROM CREDENTIALS.txt) ===
 GOOGLE_CLOUD_PROJECT=smart-scheduler-ai
 GOOGLE_CLIENT_ID=<FROM_CREDENTIALS_TXT>
 GOOGLE_CLIENT_SECRET=<FROM_CREDENTIALS_TXT>
