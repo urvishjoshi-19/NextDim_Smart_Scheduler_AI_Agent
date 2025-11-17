@@ -7,7 +7,6 @@ import re
 
 from ..utils.logger import logger
 
-
 def parse_word_number(text: str) -> Optional[int]:
     text_lower = text.lower().strip()
     
@@ -64,7 +63,6 @@ def parse_word_number(text: str) -> Optional[int]:
             return hundred_val
     
     return None
-
 
 class TimeParser:
     WEEKDAYS = {
@@ -243,10 +241,8 @@ class TimeParser:
         """
         text_lower = text.lower()
         
-        # ===================================================================
-        # NATURAL LANGUAGE PATTERNS (check these FIRST before numeric patterns)
-        # ===================================================================
-        
+                # NATURAL LANGUAGE PATTERNS (check these FIRST before numeric patterns)
+                
         # "hour and a half", "an hour and a half", "1.5 hours"
         if re.search(r'(?:an?\s+)?hour\s+and\s+a\s+half|1\.5\s*hours?', text_lower):
             logger.info("📏 Parsed duration: 'hour and a half' → 90 minutes")
@@ -265,10 +261,8 @@ class TimeParser:
                 logger.info("📏 Parsed duration: 'full hour/an hour' → 60 minutes")
                 return 60
         
-        # ===================================================================
-        # WORD NUMBER PATTERNS with UNITS (using comprehensive parser)
-        # ===================================================================
-        
+                # WORD NUMBER PATTERNS with UNITS (using comprehensive parser)
+                
         # Pattern: WORD_NUMBER + "hour(s)" or "minute(s)"
         # Examples: "sixty minutes", "sixty five minutes", "two hours"
         # Also handles: "I need sixty minutes", "make it sixty five minutes please"
@@ -302,10 +296,8 @@ class TimeParser:
                 logger.info(f"📏 Parsed duration: '{word_num_text} minute(s)' → {word_value} minutes")
                 return word_value
         
-        # ===================================================================
-        # NUMERIC PATTERNS (original patterns)
-        # ===================================================================
-        
+                # NUMERIC PATTERNS (original patterns)
+                
         # Look for combined patterns first (e.g., "1 hour 30 minutes", "1h 30m")
         combined_match = re.search(
             r'(\d+)[\s\-]*(?:hour|hr|h)(?:s)?\s*(?:and)?\s*(\d+)[\s\-]*(?:minute|min|m)(?:s)?',
@@ -538,7 +530,6 @@ class TimeParser:
         # Localize to timezone and set to start of day
         localized = self.timezone.localize(target_date.replace(hour=0, minute=0, second=0, microsecond=0))
         return localized
-
 
 def extract_time_components(text: str, timezone: str = 'Asia/Kolkata', context_time: Optional[str] = None) -> dict:
     """

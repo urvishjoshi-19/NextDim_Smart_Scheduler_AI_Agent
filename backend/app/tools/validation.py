@@ -5,14 +5,12 @@ import re
 
 from ..utils.logger import logger
 
-
 class ValidationResult:
     def __init__(self, is_valid: bool, error_type: Optional[str] = None, clarification_question: Optional[str] = None, suggestion: Optional[str] = None):
         self.is_valid = is_valid
         self.error_type = error_type
         self.clarification_question = clarification_question
         self.suggestion = suggestion
-
 
 class EdgeCaseValidator:
     MAX_REASONABLE_DURATION = 480

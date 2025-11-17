@@ -10,7 +10,6 @@ from pathlib import Path
 from ..utils.config import settings
 from ..utils.logger import logger
 
-
 class OAuthManager:
     SCOPES = [
         'https://www.googleapis.com/auth/calendar',
@@ -21,6 +20,12 @@ class OAuthManager:
     ]
     
     def __init__(self):
+        # Determine the correct redirect URI based on environment
+        if settings.environment == "production":
+            self.redirect_uri = "https://smart-scheduler-ai-lhorvsygpa-uc.a.run.app/auth/callback"
+        else:
+            self.redirect_uri = "http://localhost:8000/auth/callback"
+        
         self.client_config = {
             "web": {
                 "client_id": settings.google_client_id,
@@ -28,7 +33,7 @@ class OAuthManager:
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
                 "redirect_uris": [
-                    f"{settings.frontend_url}/auth/callback",
+                    self.redirect_uri,
                     "http://localhost:8000/auth/callback"
                 ]
             }
@@ -36,12 +41,14 @@ class OAuthManager:
         
         self.token_dir = Path("./tokens")
         self.token_dir.mkdir(exist_ok=True)
+        
+        logger.info(f"OAuth initialized with redirect_uri: {self.redirect_uri}")
     
     def get_authorization_url(self, state: Optional[str] = None) -> tuple[str, str]:
         flow = Flow.from_client_config(
             self.client_config,
             scopes=self.SCOPES,
-            redirect_uri="http://localhost:8000/auth/callback"
+            redirect_uri=self.redirect_uri
         )
         
         authorization_url, state = flow.authorization_url(
@@ -57,7 +64,7 @@ class OAuthManager:
         flow = Flow.from_client_config(
             self.client_config,
             scopes=self.SCOPES,
-            redirect_uri="http://localhost:8000/auth/callback",
+            redirect_uri=self.redirect_uri,
             state=state
         )
         
@@ -133,7 +140,6 @@ class OAuthManager:
             'name': user_info.get('name'),
             'picture': user_info.get('picture')
         }
-
 
 oauth_manager = OAuthManager()
 

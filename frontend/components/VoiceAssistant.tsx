@@ -2,10 +2,9 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mic, MicOff, Loader2 } from "lucide-react";
 import BookingConfirmation from "./BookingConfirmation";
 import ConversationDisplay from "./ConversationDisplay";
-import MicButton from "./MicButton";
+import StateIndicator from "./StateIndicator";
 
 interface Message {
   role: "user" | "assistant" | "system";
@@ -22,32 +21,187 @@ interface WorkflowState {
 type ConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
 type VoiceState = "idle" | "listening" | "thinking" | "speaking";
 
-const USER_ID = "100756814331326833034";
-const WS_URL = `ws://localhost:8000/ws/voice/${USER_ID}`;
+const BACKEND_WS_URL = process.env.NEXT_PUBLIC_WS_URL || "wss://smart-scheduler-ai-lhorvsygpa-uc.a.run.app";
 
-export default function VoiceAssistant() {
+interface VoiceAssistantProps {
+  userId: string;
+}
+
+export default function VoiceAssistant({ userId }: VoiceAssistantProps) {
+  const WS_URL = `${BACKEND_WS_URL}/ws/voice/${userId}`;
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentTranscript, setCurrentTranscript] = useState<string>("");
   const [showBookingConfirmation, setShowBookingConfirmation] = useState(false);
   const [bookingDetails, setBookingDetails] = useState<any>(null);
-  const [isRecording, setIsRecording] = useState(false);
   const [conversationStarted, setConversationStarted] = useState(false);
   
   const wsRef = useRef<WebSocket | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const audioStreamRef = useRef<MediaStream | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
   const playbackContextRef = useRef<AudioContext | null>(null);
   const nextPlayTimeRef = useRef<number>(0);
   const activeAudioSourcesRef = useRef<AudioBufferSourceNode[]>([]);
   const isPlayingAudioRef = useRef<boolean>(false);
-  const isWaitingForTranscriptRef = useRef<boolean>(false);
-  const currentUserMessageIndexRef = useRef<number>(-1);
   const hasUserInteractedRef = useRef<boolean>(false);
   const greetingSentRef = useRef<boolean>(false);
+  const audioCompletionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Audio streaming refs (for sending audio to backend)
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const isStreamingAudioRef = useRef(false);
 
+  // Helper function to convert Float32Array to Int16Array
+  const float32ToInt16 = useCallback((float32Array: Float32Array): Int16Array => {
+    const int16Array = new Int16Array(float32Array.length);
+    for (let i = 0; i < float32Array.length; i++) {
+      const s = Math.max(-1, Math.min(1, float32Array[i]));
+      int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    return int16Array;
+  }, []);
+
+    const startAudioStreaming = async () => {
+    console.log("🎤 [START AUDIO] startAudioStreaming() called");
+    console.log(`   Current state: streaming=${isStreamingAudioRef.current}`);
+    
+    if (isStreamingAudioRef.current) {
+      console.log("   ⚠️ Already streaming audio - returning");
+      return;
+    }
+    
+    try {
+      console.log(`   🔍 Checking for existing context...`);
+      console.log(`      audioContext: ${!!audioContextRef.current}`);
+      console.log(`      audioStream: ${!!audioStreamRef.current}`);
+      console.log(`      processor: ${!!processorRef.current}`);
+      
+      // Check if we already have an active context - if so, just resume streaming
+      if (audioContextRef.current && audioStreamRef.current && processorRef.current) {
+        console.log("   🔄 [STREAM] ✅ Context exists - RESUMING existing audio stream");
+        isStreamingAudioRef.current = true;
+        console.log("   ✅ [STREAM] Flag set to TRUE - processor will now send data");
+        console.log(`   ✅ [STREAM] Processor callback checks: isStreamingAudioRef.current = ${isStreamingAudioRef.current}`);
+        return;
+      }
+      
+      console.log("   🎙️ [STREAM] No existing context - Initializing NEW MediaStream for audio capture...");
+      
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 16000,
+        },
+      });
+      
+      audioStreamRef.current = stream;
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(2048, 1, 1);
+      processorRef.current = processor;
+      
+      let audioChunkCounter = 0;
+      processor.onaudioprocess = (e) => {
+        audioChunkCounter++;
+        const shouldLog = audioChunkCounter % 100 === 0; // Log every 100th chunk to avoid spam
+        
+        if (shouldLog) {
+          console.log(`🎤 [PROCESSOR] Callback fired (chunk ${audioChunkCounter})`);
+          console.log(`   WS ready: ${wsRef.current?.readyState === WebSocket.OPEN}`);
+          console.log(`   Streaming flag: ${isStreamingAudioRef.current}`);
+        }
+        
+        if (wsRef.current?.readyState === WebSocket.OPEN && isStreamingAudioRef.current) {
+          const inputData = e.inputBuffer.getChannelData(0);
+          const sourceSampleRate = audioContext.sampleRate;
+          const targetSampleRate = 16000;
+          
+          let processedData = inputData;
+          
+          // Resample if needed
+          if (sourceSampleRate !== targetSampleRate) {
+            const resampleRatio = targetSampleRate / sourceSampleRate;
+            const newLength = Math.floor(inputData.length * resampleRatio);
+            const downsampled = new Float32Array(newLength);
+            
+            const step = 1 / resampleRatio;
+            for (let i = 0; i < newLength; i++) {
+              downsampled[i] = inputData[Math.floor(i * step)];
+            }
+            
+            processedData = downsampled;
+          }
+          
+          // Convert to Int16
+          const pcmData = new Int16Array(processedData.length);
+          for (let i = 0; i < processedData.length; i++) {
+            const s = Math.max(-1, Math.min(1, processedData[i]));
+            pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+          }
+          
+          if (shouldLog) {
+            console.log(`   ✅ Sending ${pcmData.length} samples to backend`);
+          }
+          
+                    // This allows Deepgram to detect when speech ends
+          wsRef.current.send(pcmData.buffer);
+        } else if (shouldLog) {
+          console.log(`   ⏸️ Skipping send (paused or WS not ready)`);
+        }
+      };
+      
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+      
+      isStreamingAudioRef.current = true;
+      console.log("   ✅ [STREAM] Audio streaming ACTIVE - sending to backend");
+    } catch (error) {
+      console.error("   ❌ [STREAM] Failed to start:", error);
+      throw error;
+    }
+  };
+
+  // Pause streaming audio (keep context alive, just stop processing)
+  const stopAudioStreaming = async () => {
+    console.log("🛑 [STOP AUDIO] stopAudioStreaming() called");
+    console.log(`   Before: isStreamingAudioRef.current = ${isStreamingAudioRef.current}`);
+    
+    // Just set flag to false - processor keeps running but won't send data
+    isStreamingAudioRef.current = false;
+    
+    console.log(`   After: isStreamingAudioRef.current = ${isStreamingAudioRef.current}`);
+    console.log("   ✅ [STREAM] Audio streaming PAUSED (context/processor still alive)");
+  };
+  
+  // Fully cleanup audio (only called on unmount)
+  const cleanupAudioCapture = async () => {
+    console.log("   🛑 [STREAM] Full cleanup of audio capture...");
+    
+    isStreamingAudioRef.current = false;
+    
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
+    
+    if (audioContextRef.current) {
+      await audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach(track => track.stop());
+      audioStreamRef.current = null;
+    }
+    
+    console.log("   ✅ [STREAM] Audio capture fully cleaned up");
+  };
+
+  
   useEffect(() => {
     connectWebSocket();
     return () => {
@@ -63,18 +217,15 @@ export default function VoiceAssistant() {
       const ws = new WebSocket(WS_URL);
       
       ws.onopen = () => {
-        console.log("WebSocket connected");
+        console.log("✅ WebSocket connected");
         setConnectionStatus("connected");
         wsRef.current = ws;
         
         setMessages([]);
         setCurrentTranscript("");
         setVoiceState("idle");
-        setIsRecording(false);
         setShowBookingConfirmation(false);
         setBookingDetails(null);
-        isWaitingForTranscriptRef.current = false;
-        currentUserMessageIndexRef.current = -1;
         hasUserInteractedRef.current = false;
         greetingSentRef.current = false;
         setConversationStarted(false);
@@ -106,7 +257,7 @@ export default function VoiceAssistant() {
         setVoiceState("idle");
         
         if (!event.wasClean) {
-          console.log("Connection lost unexpectedly - attempting to reconnect in 3 seconds...");
+          console.log("Connection lost - attempting reconnect in 3s...");
           setTimeout(() => {
             if (wsRef.current === null || wsRef.current.readyState === WebSocket.CLOSED) {
               connectWebSocket();
@@ -138,21 +289,31 @@ export default function VoiceAssistant() {
       case "transcript":
         if (data.text && data.text.trim()) {
           setCurrentTranscript(data.text);
+          // Ensure we're in listening state when we receive transcripts
+          if (voiceState === "idle") {
+            setVoiceState("listening");
+          }
         }
         break;
         
       case "transcript_processing":
         console.log("Transcript being processed:", data.text);
         addMessage("user", data.text);
-        isWaitingForTranscriptRef.current = false;
-        currentUserMessageIndexRef.current = -1;
         setCurrentTranscript("");
         break;
         
       case "audio_start":
+        console.log("🔊 AI started speaking");
         stopAllAudio();
         setVoiceState("speaking");
         isPlayingAudioRef.current = true;
+        
+        // Clear any existing audio completion timeout
+        if (audioCompletionTimeoutRef.current) {
+          clearTimeout(audioCompletionTimeoutRef.current);
+          audioCompletionTimeoutRef.current = null;
+          console.log("Cleared previous audio completion timeout");
+        }
         
         if (playbackContextRef.current) {
           if (playbackContextRef.current.state === "suspended") {
@@ -166,14 +327,82 @@ export default function VoiceAssistant() {
         break;
         
       case "audio_end":
-        setVoiceState("idle");
+        console.log("🔇 AI audio streaming complete - waiting for playback to finish");
         isPlayingAudioRef.current = false;
-        activeAudioSourcesRef.current = activeAudioSourcesRef.current.filter(source => {
-          return source.context.state !== 'closed';
-        });
+        
+        // Wait for all audio buffers to finish playing
+        // Calculate expected playback time based on buffered audio
+        const estimatedPlaybackTime = 5000; // 5 seconds buffer
+        console.log(`⏰ Setting ${estimatedPlaybackTime}ms timeout for audio completion`);
+        
+        audioCompletionTimeoutRef.current = setTimeout(() => {
+          console.log("✅ Audio playback complete - notifying backend");
+          
+          // Notify backend that audio playback is complete
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            try {
+              wsRef.current.send(JSON.stringify({
+                type: "audio_playback_complete"
+              }));
+              console.log("📤 Sent audio_playback_complete message to backend");
+            } catch (error) {
+              console.error("Failed to send audio_playback_complete:", error);
+            }
+          } else {
+            console.warn("⚠️ WebSocket not ready to send audio_playback_complete");
+          }
+          
+          // Clean up audio sources
+          activeAudioSourcesRef.current = activeAudioSourcesRef.current.filter(source => {
+            return source.context.state !== 'closed';
+          });
+          
+          // Clear timeout ref
+          audioCompletionTimeoutRef.current = null;
+        }, estimatedPlaybackTime);
         break;
         
+      case "state_change":
+                console.log("📊 State change from backend:", data.state);
+        console.log(`   📌 Current streaming: ${isStreamingAudioRef.current}, WS connected: ${wsRef.current?.readyState === WebSocket.OPEN}`);
+        console.log(`   📌 Context: ${!!audioContextRef.current}, Stream: ${!!audioStreamRef.current}, Processor: ${!!processorRef.current}`);
+        
+        setVoiceState(data.state);
+        
+        // Ensure conversation is marked as started when we receive meaningful states
+        if ((data.state === "thinking" || data.state === "speaking" || data.state === "listening") && !conversationStarted) {
+          console.log("🎬 Conversation now active - enabling state indicator");
+          setConversationStarted(true);
+        }
+        
+        // Log state updates for UX visibility
+        if (data.state === "thinking") {
+          console.log("🤔 AI is THINKING - showing thinking animation");
+        } else if (data.state === "speaking") {
+          console.log("🗣️ AI is SPEAKING - showing speaking animation");
+        }
+        
+        // 🎤 Manage audio streaming based on state
+        if (data.state === "thinking" || data.state === "speaking") {
+          console.log("🛑 Stopping audio streaming (AI is active)");
+          stopAudioStreaming();
+        } else if (data.state === "idle" || data.state === "listening") {
+                    // We should always resume when backend says it's safe, regardless of conversationStarted state
+          console.log(`🔍 Should resume? !streaming: ${!isStreamingAudioRef.current}, WS ready: ${wsRef.current?.readyState === WebSocket.OPEN}`);
+          
+          if (!isStreamingAudioRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
+            console.log("🎤 ✅ YES - Calling startAudioStreaming() to resume");
+            startAudioStreaming().catch(err => {
+              console.error("❌ Failed to restart audio streaming:", err);
+            });
+          } else {
+            console.log(`⚠️ NO - Not resuming. Streaming: ${isStreamingAudioRef.current}, WS ready: ${wsRef.current?.readyState === WebSocket.OPEN}`);
+          }
+        }
+        break;
+      
       case "status":
+        // Legacy support
         if (data.status === "thinking") {
           setVoiceState("thinking");
         } else if (data.status === "idle") {
@@ -189,7 +418,6 @@ export default function VoiceAssistant() {
         console.error("Backend error:", data.message);
         addMessage("system", `Error: ${data.message}`);
         setVoiceState("idle");
-        isWaitingForTranscriptRef.current = false;
         break;
         
       case "log":
@@ -200,10 +428,10 @@ export default function VoiceAssistant() {
 
   const handleWorkflowMessage = (data: any) => {
     if (data.booking_confirmed === true && data.booking_details) {
-      console.log("Booking confirmed, showing confirmation dialog", data.booking_details);
+      console.log("✅ Booking confirmed:", data.booking_details);
       
       setTimeout(() => {
-                        setBookingDetails({
+        setBookingDetails({
           title: data.booking_details.title || "Meeting Scheduled",
           date: data.booking_details.date,
           duration: data.booking_details.duration,
@@ -241,20 +469,8 @@ export default function VoiceAssistant() {
         timestamp: Date.now(),
       };
       
-      if (role === "user") {
-        currentUserMessageIndexRef.current = prev.length;
-      }
-      
       return [...prev, newMessage];
     });
-  };
-
-  const toggleRecording = async () => {
-    if (isRecording) {
-      await stopRecording();
-    } else {
-      await startRecording();
-    }
   };
 
   const startConversation = async () => {
@@ -266,6 +482,7 @@ export default function VoiceAssistant() {
     try {
       hasUserInteractedRef.current = true;
       
+      // Initialize audio context for playback
       if (!playbackContextRef.current || playbackContextRef.current.state === "closed") {
         playbackContextRef.current = new AudioContext();
         
@@ -277,11 +494,15 @@ export default function VoiceAssistant() {
       }
       
       setConversationStarted(true);
+      setVoiceState("idle");
       
+            console.log("✅ Ready to listen - Deepgram will detect when you speak");
+      await startAudioStreaming();
+      
+      // Request greeting from backend
       if (!greetingSentRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         greetingSentRef.current = true;
-        const greetingRequest = { type: "ready_for_greeting" };
-        wsRef.current.send(JSON.stringify(greetingRequest));
+        wsRef.current.send(JSON.stringify({ type: "ready_for_greeting" }));
         setVoiceState("thinking");
       }
     } catch (error) {
@@ -290,121 +511,9 @@ export default function VoiceAssistant() {
     }
   };
 
-  const startRecording = async () => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      console.error("WebSocket not connected");
-      return;
-    }
-
-    try {
-      if (isPlayingAudioRef.current) {
-        stopAllAudio();
-        setVoiceState("idle");
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          sampleRate: 16000,
-        },
-      });
-
-      audioStreamRef.current = stream;
-
-      const audioContext = new AudioContext();
-      audioContextRef.current = audioContext;
-
-      const source = audioContext.createMediaStreamSource(stream);
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
-      processorRef.current = processor;
-
-      processor.onaudioprocess = (e) => {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          const inputData = e.inputBuffer.getChannelData(0);
-          const sourceSampleRate = audioContext.sampleRate;
-          const targetSampleRate = 16000;
-          
-          let processedData = inputData;
-          
-          if (sourceSampleRate !== targetSampleRate) {
-            const resampleRatio = targetSampleRate / sourceSampleRate;
-            const newLength = Math.floor(inputData.length * resampleRatio);
-            const downsampled = new Float32Array(newLength);
-            
-            for (let i = 0; i < newLength; i++) {
-              const sourceIndex = i / resampleRatio;
-              const index0 = Math.floor(sourceIndex);
-              const index1 = Math.min(index0 + 1, inputData.length - 1);
-              const fraction = sourceIndex - index0;
-              
-              downsampled[i] =
-                inputData[index0] * (1 - fraction) +
-                inputData[index1] * fraction;
-            }
-            
-            processedData = downsampled;
-          }
-          
-          const pcmData = new Int16Array(processedData.length);
-          for (let i = 0; i < processedData.length; i++) {
-            const s = Math.max(-1, Math.min(1, processedData[i]));
-            pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-          }
-          
-          wsRef.current.send(pcmData.buffer);
-        }
-      };
-
-      source.connect(processor);
-      processor.connect(audioContext.destination);
-
-      setIsRecording(true);
-      setVoiceState("listening");
-      setCurrentTranscript("");
-      isWaitingForTranscriptRef.current = true;
-    } catch (error) {
-      console.error("Failed to start recording:", error);
-      addMessage("system", "Failed to access microphone. Please allow microphone access.");
-    }
-  };
-
-  const stopRecording = async () => {
-    console.log("🛑 Stopping recording...");
-    
-    // Stop audio processing
-    if (processorRef.current) {
-      processorRef.current.disconnect();
-      processorRef.current = null;
-    }
-    
-    if (audioContextRef.current) {
-      await audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-    
-    if (audioStreamRef.current) {
-      audioStreamRef.current.getTracks().forEach((track) => track.stop());
-      audioStreamRef.current = null;
-    }
-
-    // Send stop signal to backend to process transcript
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "stop_speaking" }));
-      console.log("📤 Sent stop_speaking signal to backend");
-    }
-
-    setIsRecording(false);
-    setVoiceState("thinking");
-    // Keep currentTranscript visible until processing starts
-    
-    console.log("🛑 Recording stopped, waiting for processing...");
-  };
-
   const stopAllAudio = () => {
-    console.log("🔇 Stopping all audio playback and clearing queue");
+    console.log("🔇 Stopping all audio playback");
     
-    // Stop all active audio sources
     activeAudioSourcesRef.current.forEach((source) => {
       try {
         source.stop();
@@ -414,13 +523,10 @@ export default function VoiceAssistant() {
       }
     });
     
-    // Clear the array
     activeAudioSourcesRef.current = [];
     
-    // Reset playback timing to current time
     if (playbackContextRef.current) {
       nextPlayTimeRef.current = playbackContextRef.current.currentTime;
-      console.log("🔇 Reset playback queue to current time");
     }
     
     isPlayingAudioRef.current = false;
@@ -428,48 +534,39 @@ export default function VoiceAssistant() {
 
   const playAudio = async (audioData: ArrayBuffer) => {
     try {
-      // Validate audio data
       if (!audioData || audioData.byteLength === 0) {
-        console.warn("⚠️ Received empty audio chunk, skipping");
+        console.warn("⚠️ Empty audio chunk");
         return;
       }
       
-      // Ensure we have AudioContext (should be created on first user interaction)
       if (!playbackContextRef.current || playbackContextRef.current.state === "closed") {
-        console.warn("AudioContext not initialized - creating now (this should have been done on user interaction)");
+        console.warn("AudioContext not initialized");
         playbackContextRef.current = new AudioContext();
         nextPlayTimeRef.current = playbackContextRef.current.currentTime + 0.05;
       }
 
       const playbackContext = playbackContextRef.current;
 
-      // Resume if suspended (browser autoplay policy)
       if (playbackContext.state === "suspended") {
-        console.log("⚠️ AudioContext suspended - attempting to resume");
+        console.log("⚠️ Resuming AudioContext");
         await playbackContext.resume();
-        // Reset timing to current time when resuming from suspension
         nextPlayTimeRef.current = playbackContext.currentTime + 0.05;
-        console.log("🔊 AudioContext resumed");
       }
 
-      // Convert PCM16 to Float32 with improved normalization
+      // Convert PCM16 to Float32
       const int16Array = new Int16Array(audioData);
       
-      // Validate chunk size - too small chunks can cause issues
       if (int16Array.length < 100) {
-        console.warn(`⚠️ Very small audio chunk received (${int16Array.length} samples), may cause distortion`);
+        console.warn(`⚠️ Very small audio chunk (${int16Array.length} samples)`);
       }
       
       const float32Array = new Float32Array(int16Array.length);
       
-      // High-quality PCM16 to Float32 conversion
-      // Proper normalization prevents distortion
       const INT16_MAX = 32767.0;
       const INT16_MIN = -32768.0;
       
       for (let i = 0; i < int16Array.length; i++) {
         const sample = int16Array[i];
-        // Symmetric normalization to [-1.0, 1.0]
         if (sample < 0) {
           float32Array[i] = sample / -INT16_MIN;
         } else {
@@ -477,89 +574,55 @@ export default function VoiceAssistant() {
         }
       }
       
-      // Validate audio data - check for all zeros (silence)
       const hasAudio = float32Array.some(sample => Math.abs(sample) > 0.001);
       if (!hasAudio) {
-        console.warn("⚠️ Audio chunk contains only silence, skipping");
+        console.warn("⚠️ Audio chunk contains only silence");
         return;
       }
 
-      // Create audio buffer at source sample rate (16kHz from Deepgram)
       const sourceSampleRate = 16000;
-      const targetSampleRate = playbackContext.sampleRate;
-      
-      // CRITICAL FIX: Let the browser handle resampling natively for best quality
-      // Offline resampling was causing distortion and timing issues
-      // The Web Audio API does high-quality resampling automatically
       const audioBuffer = playbackContext.createBuffer(
         1,
         float32Array.length,
         sourceSampleRate
       );
       audioBuffer.getChannelData(0).set(float32Array);
-      
-      const finalBuffer = audioBuffer;
-      
-      if (sourceSampleRate !== targetSampleRate) {
-        console.log(`🔊 Browser will resample ${sourceSampleRate}Hz → ${targetSampleRate}Hz automatically`);
-      }
 
-      // SIMPLIFIED & ROBUST TIMING for perfect synchronization
       const currentTime = playbackContext.currentTime;
       
-      // If nextPlayTime is in the past or stale, reset to current time
       if (nextPlayTimeRef.current < currentTime) {
-        // Schedule immediately with minimal buffer
-        nextPlayTimeRef.current = currentTime + 0.001; // 1ms minimal buffer
-        console.log("🔊 Timing reset: scheduling immediately");
+        nextPlayTimeRef.current = currentTime + 0.001;
       }
 
-      // Create and configure audio source
       const source = playbackContext.createBufferSource();
-      source.buffer = finalBuffer;
-      
-      // CRITICAL: Ensure playback rate is exactly 1.0 (no speed variation)
+      source.buffer = audioBuffer;
       source.playbackRate.value = 1.0;
       
-      // Add gain control to prevent clipping and normalize volume
       const gainNode = playbackContext.createGain();
-      gainNode.gain.value = 1.0; // Full volume - no reduction needed with proper normalization
+      gainNode.gain.value = 1.0;
       
       source.connect(gainNode);
       gainNode.connect(playbackContext.destination);
       
-      // Track active source for interruption handling
       activeAudioSourcesRef.current.push(source);
       
-      // Cleanup when chunk finishes
       source.onended = () => {
         const index = activeAudioSourcesRef.current.indexOf(source);
         if (index > -1) {
           activeAudioSourcesRef.current.splice(index, 1);
         }
-        console.log(`🔊 Chunk ended (${activeAudioSourcesRef.current.length} remaining)`);
       };
       
-      // Schedule and start playback with perfect timing
       const startTime = nextPlayTimeRef.current;
-      const currentTimeNow = playbackContext.currentTime;
-      
-      // Ensure we never schedule in the past
-      const actualStartTime = Math.max(startTime, currentTimeNow);
+      const actualStartTime = Math.max(startTime, currentTime);
       
       source.start(actualStartTime);
 
-      // Calculate exact next play time for seamless gapless playback
-      const chunkDuration = finalBuffer.duration;
-      
-      // NO GAPS - perfect gapless playback for smooth synthesis
+      const chunkDuration = audioBuffer.duration;
       nextPlayTimeRef.current = actualStartTime + chunkDuration;
       
-      const queueLength = activeAudioSourcesRef.current.length;
-      console.log(`🔊 Playing chunk #${queueLength + 1}: start=${actualStartTime.toFixed(3)}s, dur=${chunkDuration.toFixed(3)}s, next=${nextPlayTimeRef.current.toFixed(3)}s, rate=${source.playbackRate.value}`);
     } catch (error) {
       console.error("❌ Audio playback error:", error);
-      // Reset on error to prevent stuck state
       if (playbackContextRef.current) {
         nextPlayTimeRef.current = playbackContextRef.current.currentTime;
       }
@@ -571,22 +634,22 @@ export default function VoiceAssistant() {
   const cleanup = () => {
     stopAllAudio();
     
+    // Fully cleanup audio capture (only on unmount)
+    cleanupAudioCapture();
+    
+    // Clear audio completion timeout
+    if (audioCompletionTimeoutRef.current) {
+      clearTimeout(audioCompletionTimeoutRef.current);
+      audioCompletionTimeoutRef.current = null;
+      console.log("Cleared audio completion timeout during cleanup");
+    }
+    
     if (wsRef.current) {
       if (wsRef.current.readyState === WebSocket.OPEN || 
           wsRef.current.readyState === WebSocket.CONNECTING) {
-        wsRef.current.close(1000, "Page refresh or component unmount");
+        wsRef.current.close(1000, "Component unmount");
       }
       wsRef.current = null;
-    }
-    
-    if (audioStreamRef.current) {
-      audioStreamRef.current.getTracks().forEach((track) => track.stop());
-      audioStreamRef.current = null;
-    }
-    
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
     }
     
     if (playbackContextRef.current && playbackContextRef.current.state !== 'closed') {
@@ -594,13 +657,6 @@ export default function VoiceAssistant() {
       playbackContextRef.current = null;
     }
     
-    if (processorRef.current) {
-      processorRef.current.disconnect();
-      processorRef.current = null;
-    }
-    
-    isWaitingForTranscriptRef.current = false;
-    currentUserMessageIndexRef.current = -1;
     nextPlayTimeRef.current = 0;
     activeAudioSourcesRef.current = [];
     isPlayingAudioRef.current = false;
@@ -653,11 +709,11 @@ export default function VoiceAssistant() {
             NextDimension AI
           </h1>
           <p className="text-gray-400 text-lg">
-            Your Intelligent Scheduling Assistant
+            Just speak - no buttons needed
           </p>
         </motion.div>
 
-        {/* Start Conversation Button (shown before conversation starts) */}
+        {/* Start Button (only shown before conversation) */}
         {connectionStatus === "connected" && !conversationStarted && (
           <motion.button
             onClick={startConversation}
@@ -671,37 +727,16 @@ export default function VoiceAssistant() {
           </motion.button>
         )}
 
-        {/* Microphone Button (shown after conversation starts) */}
+        {/* State Indicator (shown after conversation starts) */}
         {conversationStarted && (
-          <MicButton
-            isRecording={isRecording}
-            voiceState={voiceState}
-            connectionStatus={connectionStatus}
-            onToggle={toggleRecording}
+          <StateIndicator 
+            state={voiceState}
           />
         )}
 
-        {/* Status Text */}
-        <motion.div
-          className="mt-8 text-center"
-          animate={{ opacity: [0.7, 1, 0.7] }}
-          transition={{ duration: 2, repeat: Infinity }}
-        >
-          <p className="text-sm text-gray-400">
-            {connectionStatus === "connecting" && "Connecting..."}
-            {connectionStatus === "connected" && !conversationStarted && "Ready to begin"}
-            {conversationStarted && voiceState === "idle" && !isRecording && "Click mic once to start speaking, click again to send"}
-            {conversationStarted && isRecording && "Listening... Click again to send"}
-            {voiceState === "thinking" && "AI is thinking..."}
-            {voiceState === "speaking" && "AI is speaking..."}
-            {connectionStatus === "error" && "Connection error"}
-            {connectionStatus === "disconnected" && "Disconnected"}
-          </p>
-        </motion.div>
-
-        {/* Current Transcript (while speaking) */}
+        {/* Current Transcript (while listening or thinking) */}
         <AnimatePresence>
-          {currentTranscript && (isRecording || voiceState === "thinking") && (
+          {currentTranscript && conversationStarted && (
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -709,7 +744,7 @@ export default function VoiceAssistant() {
               className="mt-6 glass-strong rounded-2xl p-4 max-w-md"
             >
               <p className="text-purple-light text-sm font-medium mb-1">
-                {isRecording ? "You're saying..." : "Processing..."}
+                {voiceState === "thinking" ? "Processing..." : "You're saying..."}
               </p>
               <p className="text-white">{currentTranscript}</p>
             </motion.div>
@@ -732,4 +767,3 @@ export default function VoiceAssistant() {
     </div>
   );
 }
-

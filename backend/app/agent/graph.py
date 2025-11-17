@@ -18,8 +18,9 @@ def should_query_calendar(state: SchedulerState) -> Literal["query_calendar", "c
         logger.info("Routing: extract -> create_event (user confirmed)")
         return "create_event"
     
+    # When awaiting title input, the message has been added - END workflow to wait for user response
     if state.get("awaiting_title_input"):
-        logger.info("Routing: extract -> END (awaiting title input)")
+        logger.info("Routing: extract -> END (awaiting title input - message already sent)")
         return END
     
     if state.get("cancelled") and state.get("next_action") == "respond":
@@ -108,23 +109,17 @@ def handle_calendar_results(state: SchedulerState) -> Literal["suggest", "resolv
 
 
 def after_suggestion(state: SchedulerState) -> Literal["create_event", "extract", END]:
+    """
+    After suggesting times, END to wait for user's next message.
+    When user responds, a new workflow invocation will start from extract.
+    """
     if state.get("confirmed"):
-        logger.info("Routing: suggest -> create_event")
+        logger.info("Routing: suggest -> create_event (user confirmed)")
         return "create_event"
     
-    if state.get("messages"):
-        latest_msg = state["messages"][-1]
-        
-        if latest_msg.get("role") == "assistant":
-            logger.info("Routing: suggest -> END")
-            return END
-        
-        latest_content = latest_msg["content"].lower()
-        if any(word in latest_content for word in ["yes", "confirm", "ok", "sure", "go ahead", "book it", "schedule it"]):
-            logger.info("Routing: suggest -> create_event")
-            return "create_event"
-    
-    logger.info("Routing: suggest -> END")
+    # 🎯 Route to END to finish this workflow cycle and wait for user response
+    # The next user message will start a NEW workflow invocation
+    logger.info("Routing: suggest -> END (waiting for user selection)")
     return END
 
 
@@ -191,6 +186,7 @@ def create_scheduling_agent():
         }
     )
     
+    # These nodes send responses and END to wait for next user input
     workflow.add_edge("clarify", END)
     workflow.add_edge("resolve_conflict", END)
     

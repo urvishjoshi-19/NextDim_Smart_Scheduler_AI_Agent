@@ -12,6 +12,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Note: client_secret.json is included in the above COPY (not in .gcloudignore)
+
 RUN mkdir -p tokens
 
 EXPOSE 8000

@@ -1161,40 +1161,152 @@ backend/app/
 
 ## Deployment
 
-### Local Testing (Already Covered Above)
+### 🌐 Live Production Deployment
+
+The application is currently **live and deployed**:
+
+**Backend (Google Cloud Run):**
+- URL: `https://smart-scheduler-ai-lhorvsygpa-uc.a.run.app`
+- Status: ✅ Operational
+- Region: us-central1
+- Health Check: `/health` endpoint available
+
+**Frontend (Vercel):**
+- URL: `https://nextdimensionai-6cefgm7xz-urvishs-projects-06d78642.vercel.app`
+- Status: ✅ Live
+- Framework: Next.js 14
+- Optimized for voice streaming
+
+**Features in Production:**
+- ✅ Real-time voice conversation (sub-800ms latency)
+- ✅ Google Calendar OAuth integration
+- ✅ WebSocket streaming for audio
+- ✅ Deepgram STT/TTS with fallback to Google TTS
+- ✅ LangGraph agentic workflow
+- ✅ Secure token management
+
+### Local Testing
 
 Backend: `http://localhost:8000`
 Frontend: `http://localhost:3000`
 
-### GCP Cloud Run (Production)
+### Deploying Your Own Instance
+
+#### Backend to Google Cloud Run
 
 ```bash
-# Set your GCP project
-gcloud config set project YOUR_PROJECT_ID
-
-# Build Docker image
+# Navigate to backend directory
 cd backend
-gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/smart-scheduler
 
-# Deploy to Cloud Run
-gcloud run deploy smart-scheduler \
-  --image gcr.io/YOUR_PROJECT_ID/smart-scheduler \
-  --platform managed \
-  --region us-central1 \
-  --allow-unauthenticated \
-  --set-env-vars="GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET"
+# Ensure you have .env file configured (see Local Setup Guide)
 
-# Get deployment URL
-gcloud run services describe smart-scheduler \
-  --region us-central1 \
-  --format='value(status.url)'
+# Make deployment script executable
+chmod +x deploy-cloud-run.sh
+
+# Run deployment (builds Docker, pushes to GCR, deploys to Cloud Run)
+./deploy-cloud-run.sh
+
+# The script will:
+# - Build Docker image using Cloud Build
+# - Push to Google Container Registry
+# - Deploy to Cloud Run with environment variables
+# - Output your live backend URL
 ```
 
-**Update OAuth redirect URIs** in Google Cloud Console to include your Cloud Run URL.
+**Post-Deployment:**
+1. Update OAuth redirect URIs in [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+2. Add your Cloud Run URL callback: `https://YOUR-URL/auth/callback`
+3. Test health endpoint: `curl YOUR-URL/health`
 
-### GCP Compute Engine VM (Traditional Server)
+#### Frontend to Vercel
 
-See `docs/GCP_SETUP.md` for detailed VM deployment instructions.
+```bash
+# Navigate to frontend directory
+cd frontend
+
+# Install Vercel CLI (if not already installed)
+npm install -g vercel
+
+# Deploy to production
+npx vercel --prod
+
+# Set environment variables during deployment:
+# NEXT_PUBLIC_API_URL=https://your-backend-url.run.app
+# NEXT_PUBLIC_WS_URL=wss://your-backend-url.run.app
+```
+
+**Alternative:** Use the provided deployment script:
+```bash
+cd frontend
+./deploy-vercel.sh
+```
+
+### Deployment Configuration Files
+
+**Backend:**
+- `Dockerfile` - Container configuration
+- `deploy-cloud-run.sh` - Automated deployment script
+- `.gcloudignore` - Files to exclude from build
+
+**Frontend:**
+- `next.config.js` - Next.js configuration with CORS headers
+- `deploy-vercel.sh` - Automated Vercel deployment script
+- `vercel.json` - Vercel configuration (if present)
+
+### Environment Variables for Production
+
+**Backend (Cloud Run):**
+```bash
+DEEPGRAM_API_KEY=your_key
+GEMINI_API_KEY=your_key
+GOOGLE_CLOUD_PROJECT=your_project_id
+GOOGLE_CLIENT_ID=your_client_id
+GOOGLE_CLIENT_SECRET=your_client_secret
+SESSION_SECRET=your_random_secret
+ENVIRONMENT=production
+FRONTEND_URL=https://your-frontend-url.vercel.app
+DEFAULT_TIMEZONE=Asia/Kolkata
+```
+
+**Frontend (Vercel):**
+```bash
+NEXT_PUBLIC_API_URL=https://your-backend.run.app
+NEXT_PUBLIC_WS_URL=wss://your-backend.run.app
+```
+
+### Monitoring Production
+
+**Backend Logs:**
+```bash
+# View real-time logs
+gcloud run logs tail --service=smart-scheduler-ai --region=us-central1
+
+# View recent logs
+gcloud run logs read --service=smart-scheduler-ai --limit=100
+```
+
+**Frontend Logs:**
+```bash
+# View deployment logs
+vercel logs YOUR_DEPLOYMENT_URL
+
+# View real-time logs
+vercel logs --follow
+```
+
+### Scaling Configuration
+
+**Cloud Run Auto-scaling:**
+- Min instances: 0 (scales to zero when not in use)
+- Max instances: 10
+- Memory: 1Gi
+- CPU: 1 vCPU
+- Timeout: 300s (5 minutes for long conversations)
+
+**Vercel:**
+- Auto-scales based on traffic
+- Edge Network for global distribution
+- Built-in CDN for static assets
 
 ---
 

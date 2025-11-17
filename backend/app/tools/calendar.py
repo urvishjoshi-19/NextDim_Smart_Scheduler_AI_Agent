@@ -9,7 +9,6 @@ from dateutil import parser
 from ..utils.logger import logger
 from ..utils.debug_events import emit_calendar_query, emit_calendar_events, emit_availability_check
 
-
 class GoogleCalendarTool:
     def __init__(self, credentials: Credentials):
         self.credentials = credentials

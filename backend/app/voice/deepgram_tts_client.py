@@ -6,7 +6,6 @@ import httpx
 from ..utils.config import settings
 from ..utils.logger import logger
 
-
 class DeepgramTTSClient:
     def __init__(self):
         self.api_key = settings.deepgram_api_key
@@ -39,7 +38,8 @@ class DeepgramTTSClient:
                 options
             )
             
-            async with httpx.AsyncClient() as http_client:
+            # Use longer timeout for TTS to prevent hangs
+            async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as http_client:
                 headers = {
                     "Authorization": f"Token {self.api_key}",
                     "Content-Type": "application/json"
@@ -54,12 +54,13 @@ class DeepgramTTSClient:
                     url,
                     headers=headers,
                     json=payload,
-                    timeout=30.0
                 ) as response:
                     response.raise_for_status()
                     
                     chunk_count = 0
-                    async for chunk in response.aiter_bytes(chunk_size=16384):
+                    # Smaller chunks for lower latency and smoother playback
+                    # 4096 bytes = 2048 samples = 128ms at 16kHz (optimal for streaming)
+                    async for chunk in response.aiter_bytes(chunk_size=4096):
                         if chunk and len(chunk) > 0:
                             chunk_count += 1
                             if chunk_count == 1:
@@ -69,6 +70,12 @@ class DeepgramTTSClient:
                     
                     logger.debug(f"Completed streaming {chunk_count} chunks")
         
+        except httpx.TimeoutException as e:
+            logger.error(f"TTS request timeout: {e}")
+            raise Exception("Speech synthesis timed out")
+        except httpx.HTTPError as e:
+            logger.error(f"TTS HTTP error: {e}")
+            raise Exception(f"Speech synthesis failed: {str(e)}")
         except Exception as e:
             logger.error(f"Error in streaming TTS: {e}")
             raise
@@ -107,7 +114,6 @@ class DeepgramTTSClient:
             container="none"
         )
         logger.info(f"Changed voice to: {voice_model}")
-
 
 class DeepgramTTSManager:
     def __init__(self):
@@ -150,7 +156,6 @@ class DeepgramTTSManager:
     
     def set_voice(self, voice_model: str):
         self.client.set_voice(voice_model)
-
 
 deepgram_tts_manager = DeepgramTTSManager()
 

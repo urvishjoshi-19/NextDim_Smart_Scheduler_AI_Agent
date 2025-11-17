@@ -1,0 +1,206 @@
+========================================
+  SMART SCHEDULER AI - CLOUD RUN DEPLOYMENT
+  Step-by-Step Guide
+========================================
+
+✅ Prerequisites DONE:
+- [x] Google Cloud account
+- [x] gcloud CLI installed
+- [x] Logged in: gcloud auth login
+- [x] Project set: uwmodel
+- [x] Cloud Run API enabled
+- [x] .env file configured
+- [x] client_secret.json in place
+
+========================================
+  DEPLOYMENT STEPS
+========================================
+
+STEP 1: Navigate to Backend Directory
+--------------------------------------
+Run this command:
+
+cd /Users/Glitch/NextDimension_AI/backend
+
+
+STEP 2: Run the Deployment Script
+--------------------------------------
+This single script will:
+- Build your Docker image
+- Push to Google Container Registry
+- Deploy to Cloud Run
+- Set all environment variables
+
+Run this command:
+
+./deploy-cloud-run.sh
+
+⏱️  This will take 5-10 minutes. You'll see:
+- "Building Docker image..." (3-5 min)
+- "Deploying to Cloud Run..." (2-3 min)
+- Your live URL at the end!
+
+
+STEP 3: Test Your Deployment
+--------------------------------------
+After deployment completes, you'll get a URL like:
+https://smart-scheduler-ai-XXXXX-uc.a.run.app
+
+Test it with:
+
+curl YOUR_CLOUD_RUN_URL/health
+
+Expected response:
+{"status":"healthy","service":"Smart Scheduler AI Agent","version":"1.0.0"}
+
+
+STEP 4: Update OAuth Redirect URIs
+--------------------------------------
+⚠️  CRITICAL: Your OAuth won't work until you do this!
+
+1. Go to Google Cloud Console:
+   https://console.cloud.google.com/apis/credentials
+
+2. Click on your OAuth 2.0 Client ID
+   (Should be named something like "Web client 1")
+
+3. Under "Authorized redirect URIs", ADD:
+   https://smart-scheduler-ai-XXXXX-uc.a.run.app/auth/callback
+   (Replace with YOUR actual Cloud Run URL)
+
+4. Keep the localhost one for local development:
+   http://localhost:8000/auth/callback
+
+5. Click SAVE
+
+
+STEP 5: Test OAuth Login
+--------------------------------------
+Visit this URL in your browser:
+YOUR_CLOUD_RUN_URL/auth/login
+
+You should:
+1. See Google login screen
+2. Grant calendar permissions
+3. Get redirected successfully
+4. Get a user_id in the URL
+
+
+STEP 6: Update Frontend (if using)
+--------------------------------------
+If you want to deploy the frontend too:
+
+Edit: frontend/components/VoiceAssistant.tsx
+
+Change WebSocket URL from:
+ws://localhost:8000/ws/voice/${userId}
+
+To:
+wss://YOUR_CLOUD_RUN_URL/ws/voice/${userId}
+(Note: wss:// not ws:// for secure connection)
+
+
+========================================
+  TROUBLESHOOTING
+========================================
+
+Problem: "gcloud: command not found"
+Solution: Install gcloud CLI from:
+https://cloud.google.com/sdk/docs/install
+
+Problem: "Permission denied" on deploy script
+Solution: Run: chmod +x deploy-cloud-run.sh
+
+Problem: "OAuth redirect URI mismatch"
+Solution: Double-check Step 4 - URIs must match EXACTLY
+
+Problem: "Image not found"
+Solution: Wait 1 minute after build completes, then try again
+
+Problem: "Service Unavailable" after deployment
+Solution: Check logs:
+gcloud run logs read --service=smart-scheduler-ai --region=us-central1
+
+Problem: Can't find client_secret.json during build
+Solution: Make sure it's in backend/ directory
+
+
+========================================
+  VIEWING LOGS (Important for Debugging)
+========================================
+
+To see real-time logs:
+
+gcloud run logs tail --service=smart-scheduler-ai --region=us-central1
+
+To see specific errors:
+
+gcloud run logs read --service=smart-scheduler-ai --region=us-central1 --limit=50
+
+
+========================================
+  UPDATING YOUR DEPLOYMENT
+========================================
+
+If you make code changes later, just run:
+
+cd /Users/Glitch/NextDimension_AI/backend
+./deploy-cloud-run.sh
+
+It will rebuild and redeploy automatically!
+
+
+========================================
+  COST INFORMATION
+========================================
+
+Cloud Run Free Tier Includes:
+- 2 million requests/month
+- 360,000 GB-seconds of memory
+- 180,000 vCPU-seconds
+
+Your app config (1Gi RAM, 1 CPU) is well within free tier
+for development/demo purposes.
+
+
+========================================
+  NEXT STEPS AFTER DEPLOYMENT
+========================================
+
+1. ✅ Test health endpoint
+2. ✅ Test OAuth login
+3. ✅ Test scheduling with curl:
+
+curl -X POST YOUR_CLOUD_RUN_URL/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "YOUR_USER_ID_FROM_OAUTH",
+    "message": "Schedule 30 minutes tomorrow at 2 PM"
+  }'
+
+4. Update README.md with your live URL
+5. (Optional) Deploy frontend to Vercel
+6. (Optional) Set up custom domain
+
+
+========================================
+  SUPPORT
+========================================
+
+If you get stuck:
+1. Check the logs (commands above)
+2. Verify all environment variables are set
+3. Confirm OAuth redirect URIs match
+4. Make sure APIs are enabled in GCP
+
+
+========================================
+  READY TO DEPLOY?
+========================================
+
+Run this NOW:
+
+cd /Users/Glitch/NextDimension_AI/backend && ./deploy-cloud-run.sh
+
+
+

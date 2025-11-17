@@ -5,7 +5,6 @@ import base64
 from ..utils.config import settings
 from ..utils.logger import logger
 
-
 class GoogleTTSClient:
     def __init__(self):
         self.client = texttospeech.TextToSpeechClient()
@@ -77,7 +76,6 @@ class GoogleTTSClient:
         self.audio_config.pitch = pitch
         logger.info(f"Set pitch: {pitch}")
 
-
 class GoogleTTSManager:
     def __init__(self):
         self.client = GoogleTTSClient()
@@ -100,6 +98,20 @@ class GoogleTTSManager:
         self.cache.clear()
         logger.info("Cleared TTS cache")
 
+# Lazy initialization - only create when needed (allows Cloud Run to use default credentials)
+_tts_manager = None
 
-tts_manager = GoogleTTSManager()
+def get_tts_manager():
+    global _tts_manager
+    if _tts_manager is None:
+        try:
+            _tts_manager = GoogleTTSManager()
+            logger.info("Initialized Google TTS manager")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Google TTS manager: {e}. TTS will not be available.")
+            _tts_manager = None
+    return _tts_manager
+
+# For backward compatibility
+tts_manager = None  # Will be lazily initialized when first accessed
 

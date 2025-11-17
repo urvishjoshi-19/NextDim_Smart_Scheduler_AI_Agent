@@ -14,7 +14,6 @@ from typing import Optional, Dict, Tuple
 from datetime import datetime, time
 import pytz
 
-
 class TimeFormat:
     """
     Utility class for time format conversions and validation.
@@ -330,18 +329,15 @@ class TimeFormat:
         except:
             return "unknown"
 
-
 # Convenience functions for common use cases
 
 def convert_to_24hr(time_str: str, context: Optional[str] = None) -> Optional[str]:
     """Shorthand for TimeFormat.parse_to_24hr()"""
     return TimeFormat.parse_to_24hr(time_str, context)
 
-
 def convert_to_12hr(time_24hr: str) -> str:
     """Shorthand for TimeFormat.to_12hr_display()"""
     return TimeFormat.to_12hr_display(time_24hr)
-
 
 def validate_time(time_str: str, context: Optional[str] = None) -> Tuple[str, bool]:
     """Shorthand for TimeFormat.validate_and_correct()"""

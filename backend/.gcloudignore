@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Environment files (we'll set these as Cloud Run env vars)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Tokens (will be created at runtime)
+tokens/
+tokens/*.json
+
+# IMPORTANT: Keep client_secret.json (needed for OAuth)
+# Do NOT ignore: client_secret.json
+
+# Docs
+docs/
+README.md
+
+# Tests
+tests/
+

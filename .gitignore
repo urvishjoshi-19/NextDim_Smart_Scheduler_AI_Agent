@@ -58,3 +58,11 @@ coverage/
 # Google Cloud SDK (contains test keys)
 exec -l/
 
+# Documentation (except README.md)
+*.md
+!README.md
+docs/
+DEPLOY*.md
+IMPLEMENTATION*.md
+VERCEL*.md
+
